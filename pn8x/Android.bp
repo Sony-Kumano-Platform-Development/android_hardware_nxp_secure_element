@@ -62,6 +62,59 @@ cc_library_shared {
     ],
 }
 
+// Current NFC AIDL implementations do not expose the legacy NXP HIDL ioctl
+// interface used by NfcAdaptation. Keep that compatibility path isolated from
+// the original PN8x library used by the HIDL secure-element services.
+cc_library_shared {
+    name: "ese_spi_nxp_direct",
+    defaults: ["hidl_defaults"],
+    proprietary: true,
+
+    srcs: [
+        "libese-spi/p73/lib/phNxpEseDataMgr.cpp",
+        "libese-spi/p73/lib/phNxpEseProto7816_3.cpp",
+        "libese-spi/p73/lib/phNxpEse_Api.cpp",
+        "libese-spi/p73/pal/phNxpEsePal.cpp",
+        "libese-spi/p73/pal/spi/phNxpEsePal_spi.cpp",
+        "libese-spi/p73/spm/phNxpEse_Spm.cpp",
+        "libese-spi/p73/utils/ese_config.cpp",
+        "libese-spi/p73/utils/config.cpp",
+        "libese-spi/p73/utils/ringbuffer.cpp",
+    ],
+
+    local_include_dirs: [
+        "libese-spi/p73/lib",
+        "libese-spi/p73/pal/spi",
+        "libese-spi/p73/utils",
+    ],
+    export_include_dirs: [
+        "extns/impl",
+        "libese-spi/common/include",
+        "libese-spi/p73/common",
+        "libese-spi/p73/inc",
+        "libese-spi/p73/pal",
+    ],
+
+    cflags: [
+        "-DANDROID",
+        "-DBUILDCFG=1",
+        "-DNXP_EXTNS=TRUE",
+        "-DNXP_ESE_DIRECT_P73",
+        "-Wall",
+        "-Werror",
+    ],
+
+    shared_libs: [
+        "libcutils",
+        "libhardware",
+        "libhidlbase",
+        "libutils",
+        "liblog",
+        "libbase",
+        "vendor.nxp.nxpese@1.0",
+    ],
+}
+
 cc_library_shared {
 
     name: "ls_client",
@@ -82,7 +135,29 @@ cc_library_shared {
         "libhidlbase",
         "liblog",
         "libutils",
-        "libcrypto"
+        "libcrypto",
+    ],
+}
+
+cc_library_shared {
+    name: "ls_client_direct",
+    defaults: ["hidl_defaults"],
+    proprietary: true,
+
+    srcs: [
+        "ls_client/src/LsLib.cpp",
+        "ls_client/src/LsClient.cpp",
+    ],
+
+    export_include_dirs: ["ls_client/inc"],
+
+    shared_libs: [
+        "ese_spi_nxp_direct",
+        "libcutils",
+        "liblog",
+        "libhidlbase",
+        "libutils",
+        "libcrypto",
     ],
 }
 

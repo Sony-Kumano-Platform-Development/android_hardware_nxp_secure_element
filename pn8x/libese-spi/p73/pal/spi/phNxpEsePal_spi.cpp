@@ -37,16 +37,32 @@
 #include <phNxpEsePal.h>
 #include <phNxpEsePal_spi.h>
 #include <string.h>
+#ifndef NXP_ESE_DIRECT_P73
 #include "NfcAdaptation.h"
+#endif
 #include "hal_nxpese.h"
 #include "phNxpEse_Api.h"
 
 #define MAX_RETRY_CNT 10
+#ifndef NXP_ESE_DIRECT_P73
 #define HAL_NFC_SPI_DWP_SYNC 21
+#endif
 #define RF_ON 1
 
+#ifndef NXP_ESE_DIRECT_P73
 extern int omapi_status;
+#endif
 extern bool ese_debug_enabled;
+
+#ifdef NXP_ESE_DIRECT_P73
+// P73 exposes the same P61 power-management ABI used by Sony's PN81T stack.
+#define P61_MAGIC 0xEA
+#define P61_SET_SPM_PWR _IOW(P61_MAGIC, 0x04, long)
+#define P61_GET_SPM_STATUS _IOR(P61_MAGIC, 0x05, long)
+#define P61_GET_ESE_ACCESS _IOW(P61_MAGIC, 0x07, long)
+#define P61_SET_POWER_SCHEME _IOW(P61_MAGIC, 0x08, long)
+#define P61_INHIBIT_PWR_CNTRL _IOW(P61_MAGIC, 0x0A, long)
+#endif
 
 static int rf_status;
 unsigned long int configNum1, configNum2;
@@ -65,15 +81,16 @@ static const uint8_t MAX_SPI_WRITE_RETRY_COUNT_HW_ERR = 3;
 **
 *******************************************************************************/
 void phPalEse_spi_close(void* pDevHandle) {
+#ifndef NXP_ESE_DIRECT_P73
   ese_nxp_IoctlInOutData_t inpOutData;
   static uint8_t cmd_omapi_concurrent[] = {0x2F, 0x01, 0x01, 0x00};
   int retval;
+#endif
   ALOGD_IF(ese_debug_enabled, "halimpl close enter.");
 
+#ifndef NXP_ESE_DIRECT_P73
   NfcAdaptation& pNfcAdapt = NfcAdaptation::GetInstance();
   pNfcAdapt.Initialize();
-  // nxpesehal_ctrl.p_ese_stack_cback = p_cback;
-  // nxpesehal_ctrl.p_ese_stack_data_cback = p_data_cback;
   memset(&inpOutData, 0x00, sizeof(ese_nxp_IoctlInOutData_t));
   inpOutData.inp.data.nxpCmd.cmd_len = sizeof(cmd_omapi_concurrent);
   inpOutData.inp.data_source = 1;
@@ -81,6 +98,7 @@ void phPalEse_spi_close(void* pDevHandle) {
          sizeof(cmd_omapi_concurrent));
   retval = pNfcAdapt.HalIoctl(HAL_NFC_SPI_DWP_SYNC, &inpOutData);
   ALOGD_IF(ese_debug_enabled, "_spi_close() status %x", retval);
+#endif
 
   if (NULL != pDevHandle) {
     close((intptr_t)pDevHandle);
@@ -124,12 +142,16 @@ ESESTATUS phNxpEse_spiIoctl(uint64_t ioctlType, void* p_data) {
 *******************************************************************************/
 ESESTATUS phPalEse_spi_open_and_configure(pphPalEse_Config_t pConfig) {
   int nHandle;
+#ifdef NXP_ESE_DIRECT_P73
+  int retryCnt = 0;
+#else
   int retryCnt = 0, nfc_access_retryCnt = 0;
   int retval;
   ese_nxp_IoctlInOutData_t inpOutData;
   NfcAdaptation& pNfcAdapt = NfcAdaptation::GetInstance();
   pNfcAdapt.Initialize();
   static uint8_t cmd_omapi_concurrent[] = {0x2F, 0x01, 0x01, 0x01};
+#endif
 
   if (EseConfig::hasKey(NAME_NXP_SOF_WRITE)) {
     configNum1 = EseConfig::getUnsigned(NAME_NXP_SOF_WRITE);
@@ -143,6 +165,7 @@ ESESTATUS phPalEse_spi_open_and_configure(pphPalEse_Config_t pConfig) {
              "NXP_SPI_WRITE_TIMEOUT value from config file = %ld", configNum2);
   }
   ALOGD_IF(ese_debug_enabled, "halimpl open enter.");
+#ifndef NXP_ESE_DIRECT_P73
   memset(&inpOutData, 0x00, sizeof(ese_nxp_IoctlInOutData_t));
   inpOutData.inp.data.nxpCmd.cmd_len = sizeof(cmd_omapi_concurrent);
   inpOutData.inp.data_source = 1;
@@ -159,7 +182,7 @@ retry_nfc_access:
     if (nfc_access_retryCnt < 5) goto retry_nfc_access;
     return ESESTATUS_FAILED;
   }
-
+#endif
   ALOGD_IF(ese_debug_enabled, "Opening port=%s\n", pConfig->pDevName);
   /* open port */
 
@@ -299,6 +322,7 @@ ESESTATUS phPalEse_spi_ioctl(phPalEse_ControlCode_t eControlCode,
   ESESTATUS ret = ESESTATUS_IOCTL_FAILED;
   ALOGD_IF(ese_debug_enabled, "phPalEse_spi_ioctl(), ioctl %x , level %lx",
            eControlCode, level);
+#ifndef NXP_ESE_DIRECT_P73
   ese_nxp_IoctlInOutData_t inpOutData;
   inpOutData.inp.level = level;
   NfcAdaptation& pNfcAdapt = NfcAdaptation::GetInstance();
@@ -306,28 +330,16 @@ ESESTATUS phPalEse_spi_ioctl(phPalEse_ControlCode_t eControlCode,
     return ESESTATUS_IOCTL_FAILED;
   }
   switch (eControlCode) {
-    // Nfc Driver communication part
     case phPalEse_e_ChipRst:
       ret = pNfcAdapt.HalIoctl(HAL_NFC_SET_SPM_PWR, &inpOutData);
       break;
-
     case phPalEse_e_SetPowerScheme:
-      // ret = sendIoctlData(p, HAL_NFC_SET_POWER_SCHEME, &inpOutData);
-      ret = ESESTATUS_SUCCESS;
-      break;
-
     case phPalEse_e_GetSPMStatus:
-      // ret = sendIoctlData(p, HAL_NFC_GET_SPM_STATUS, &inpOutData);
-      ret = ESESTATUS_SUCCESS;
-      break;
-
     case phPalEse_e_GetEseAccess:
-      // ret = sendIoctlData(p, HAL_NFC_GET_ESE_ACCESS, &inpOutData);
       ret = ESESTATUS_SUCCESS;
       break;
 #ifdef NXP_ESE_JCOP_DWNLD_PROTECTION
     case phPalEse_e_SetJcopDwnldState:
-      // ret = sendIoctlData(p, HAL_NFC_SET_DWNLD_STATUS, &inpOutData);
       ret = ESESTATUS_SUCCESS;
       break;
 #endif
@@ -339,4 +351,44 @@ ESESTATUS phPalEse_spi_ioctl(phPalEse_ControlCode_t eControlCode,
       break;
   }
   return ret;
+#else
+  if (NULL == pDevHandle) {
+    return ESESTATUS_IOCTL_FAILED;
+  }
+  const int fd = static_cast<int>(reinterpret_cast<intptr_t>(pDevHandle));
+  unsigned long request = 0;
+  long ioctl_level = level;
+  switch (eControlCode) {
+    case phPalEse_e_ChipRst:
+      request = P61_SET_SPM_PWR;
+      // The PN8x library uses 0/1 for enable/disable, while the old
+      // PN553 P61 driver expects 1/0 for SPI power on/off.
+      if (level == 0) {  // SPM_POWER_ENABLE
+        ioctl_level = 1;
+      } else if (level == 1) {  // SPM_POWER_DISABLE
+        ioctl_level = 0;
+      }
+      break;
+    case phPalEse_e_SetPowerScheme:
+      request = P61_SET_POWER_SCHEME;
+      break;
+    case phPalEse_e_GetSPMStatus:
+      request = P61_GET_SPM_STATUS;
+      break;
+    case phPalEse_e_GetEseAccess:
+      request = P61_GET_ESE_ACCESS;
+      break;
+#ifdef NXP_ESE_JCOP_DWNLD_PROTECTION
+    case phPalEse_e_SetJcopDwnldState:
+      ret = ESESTATUS_SUCCESS;
+      return ret;
+#endif
+    case phPalEse_e_DisablePwrCntrl:
+      request = P61_INHIBIT_PWR_CNTRL;
+      break;
+    default:
+      return ESESTATUS_IOCTL_FAILED;
+  }
+  return static_cast<ESESTATUS>(ioctl(fd, request, ioctl_level));
+#endif
 }
